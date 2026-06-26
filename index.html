@@ -14,13 +14,12 @@
 <body class="bg-black text-white font-sans overflow-hidden m-0 h-screen w-screen selection:bg-transparent">
 
     <div id="mode-selection" class="absolute inset-0 z-50 flex flex-col justify-center items-center bg-white p-6 text-center">
-        
         <div class="mb-4">
             <p class="text-xs text-indigo-600 font-bold tracking-widest uppercase">School of Engineering Physics and Mathematics </p>
-            <img src="uea-logo.png" alt="University Logo" class="h-12 w-auto opacity-80 hover:opacity-100 transition-all">
+            <img src="uea-logo.png" alt="University Logo" class="h-12 w-auto opacity-80 hover:opacity-100 transition-all mx-auto mt-2">
         </div>
 
-        <h1 class="text-3xl font-black mb-2 text-slate-800"> "Hologram" Project </h1>
+        <h1 class="text-3xl font-black mb-2 text-slate-800"> "Hologram" Project EMP </h1>
         <p class="text-xs text-slate-500 mb-8 max-w-xs">ระบบฉายแสง 3 ด้านสมมาตร ควบคุมผ่าน Touchpad หรือกล้องสแกนวัตถุจริง</p>
         
         <div class="flex flex-col gap-4 w-full max-w-xs">
@@ -92,7 +91,6 @@
                     <span class="text-sm text-slate-300 font-bold">Virtual Touchpad</span>
                     <span class="text-[10px] text-slate-500 mt-1">ลากนิ้วในกรอบนี้เพื่อหมุนวัตถุ</span>
                 </div>
-
                 <div id="area-twin-mode" class="hidden w-full bg-slate-900 rounded-xl border border-slate-800 p-2 text-center space-y-2">
                     <div class="relative w-full h-72 bg-black rounded-lg overflow-hidden border border-slate-700">
                         <video id="webcam-video" class="w-full h-full object-cover" autoplay playsinline></video>
@@ -108,9 +106,8 @@
                     <button onclick="sendAction('shape', 'cone')" class="bg-slate-800 hover:bg-slate-700 py-2 rounded-md text-[10px] font-medium">ทรงกรวย</button>
                     <button onclick="sendAction('shape', 'custom_artifact')" class="bg-emerald-600 hover:bg-emerald-500 py-2 rounded-md text-[10px] font-bold shadow-lg text-white">🚪 Door Lock</button>
                 </div>
-                
                 <div class="pt-2 border-t border-slate-800">
-                    <label class="block text-[11px] font-bold text-slate-300 mb-1">🎨 แถบเลือกสีอิสระ (Color Bar)</label>
+                    <label class="block text-[11px] font-bold text-slate-300 mb-1">🎨 เลือกสี (เฉพาะรูปทรงเรขาคณิต)</label>
                     <input type="color" id="custom-color-picker" value="#00ffcc" oninput="sendAction('color', this.value)" class="w-full h-12 cursor-pointer rounded-md border-2 border-slate-600 bg-slate-900 p-1">
                 </div>
             </div>
@@ -121,7 +118,6 @@
                     <span id="scale-val" class="text-indigo-400">100%</span>
                 </div>
                 <input type="range" min="30" max="200" value="100" oninput="document.getElementById('scale-val').innerText = this.value + '%'; sendAction('scale', this.value)" class="w-full accent-indigo-500">
-                
                 <div class="flex justify-between text-[10px] font-bold text-slate-400 pt-2">
                     <span>ระยะศูนย์กลาง (Offset)</span>
                     <span id="offset-val" class="text-indigo-400">130px</span>
@@ -164,7 +160,6 @@
                 peer = new Peer(roomCode, { debug: 2 });
                 peer.on('open', id => document.getElementById('display-peer-id').innerText = id.replace("uea-twin-", ""));
                 peer.on('connection', connection => { conn = connection; setupReceiver(); });
-                
                 connectToPythonBackend();
             }
         }
@@ -195,10 +190,17 @@
                     const currentColor = picker ? picker.value : "#00ffcc";
                     recreateAllGeometries(data.value, currentColor);
                 } else if (data.type === 'color') {
-                    currentMeshes.forEach(mesh => { if(mesh.material && mesh.material.color) mesh.material.color.set(data.value); });
+                    currentMeshes.forEach(mesh => { 
+                        if(mesh.userData && mesh.userData.isCustom) return; // ล็อกไม่ให้เปลี่ยนสีทับโมเดลประตู
+                        if(mesh.material && mesh.material.color) mesh.material.color.set(data.value); 
+                    });
                 } else if (data.type === 'scale') {
                     baseScale = data.value / 100;
-                    currentMeshes.forEach(mesh => mesh.scale.set(baseScale, baseScale, baseScale));
+                    currentMeshes.forEach(mesh => {
+                        // แยกสเกลย่อส่วนสำหรับกลอนประตูโดยเฉพาะ
+                        let s = (mesh.userData && mesh.userData.isCustom) ? baseScale * 0.04 : baseScale;
+                        mesh.scale.set(s, s, s);
+                    });
                 } else if (data.type === 'offset') {
                     baseOffset = parseInt(data.value);
                 } else if (data.type === 'rotate') {
@@ -225,14 +227,8 @@
         }
 
         function connectToPythonBackend() {
-            console.log("⚡ กำลังเชื่อมต่อ Python Backend...");
             pythonSocket = new WebSocket('ws://127.0.0.1:8080');
-
-            pythonSocket.onopen = () => {
-                console.log("✅ เชื่อมต่อสำเร็จ!");
-                updatePythonStatusUI(true);
-            };
-
+            pythonSocket.onopen = () => updatePythonStatusUI(true);
             pythonSocket.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 if (data.type === 'twin_rotate') {
@@ -240,51 +236,30 @@
                     else if (myRole === 'controller') sendAction('twin_rotate', data.value);
                 }
             };
-
-            pythonSocket.onclose = () => {
-                updatePythonStatusUI(false);
-                setTimeout(connectToPythonBackend, 4000); 
-            };
-
+            pythonSocket.onclose = () => { updatePythonStatusUI(false); setTimeout(connectToPythonBackend, 4000); };
             pythonSocket.onerror = () => updatePythonStatusUI(false);
         }
 
         function updatePythonStatusUI(isConnected) {
             const screenStatus = document.getElementById('screen-python-status');
             const ctrlStatus = document.getElementById('ctrl-python-status');
-            
             const msg = isConnected ? "🟢 Python: เชื่อมต่อสมองกลสำเร็จ!" : "🔴 Python: ขาดการเชื่อมต่อ";
             const bgClass = isConnected ? "bg-emerald-900/30 border-emerald-500/50 text-emerald-400" : "bg-red-900/30 border-red-500/50 text-red-400";
 
-            if (screenStatus) { 
-                screenStatus.innerText = msg; 
-                screenStatus.className = `mt-2 text-[11px] font-bold px-3 py-1.5 rounded-lg border shadow-lg ${bgClass}`; 
-            }
-            if (ctrlStatus) { 
-                ctrlStatus.innerText = msg; 
-                ctrlStatus.className = `inline-block mt-1 text-[11px] font-bold px-3 py-1 rounded-lg border ${bgClass}`; 
-            }
+            if (screenStatus) screenStatus.innerText = msg, screenStatus.className = `mt-2 text-[11px] font-bold px-3 py-1.5 rounded-lg border shadow-lg ${bgClass}`;
+            if (ctrlStatus) ctrlStatus.innerText = msg, ctrlStatus.className = `inline-block mt-1 text-[11px] font-bold px-3 py-1 rounded-lg border ${bgClass}`;
         }
 
         function switchControlMode(mode) {
             currentMode = mode;
-            const btnTouch = document.getElementById('btn-touch-mode');
-            const btnTwin = document.getElementById('btn-twin-mode');
-            const areaTouch = document.getElementById('area-touch-mode');
-            const areaTwin = document.getElementById('area-twin-mode');
-
+            const btnTouch = document.getElementById('btn-touch-mode'), btnTwin = document.getElementById('btn-twin-mode');
+            const areaTouch = document.getElementById('area-touch-mode'), areaTwin = document.getElementById('area-twin-mode');
             if (mode === 'touch') {
-                btnTouch.className = "bg-indigo-600 py-2 rounded-lg text-xs font-bold shadow-md";
-                btnTwin.className = "bg-slate-800 py-2 rounded-lg text-xs font-bold";
-                areaTouch.classList.remove('hidden');
-                areaTwin.classList.add('hidden');
-                stopCameraStream();
+                btnTouch.className = "bg-indigo-600 py-2 rounded-lg text-xs font-bold shadow-md", btnTwin.className = "bg-slate-800 py-2 rounded-lg text-xs font-bold";
+                areaTouch.classList.remove('hidden'), areaTwin.classList.add('hidden'), stopCameraStream();
             } else {
-                btnTwin.className = "bg-indigo-600 py-2 rounded-lg text-xs font-bold shadow-md";
-                btnTouch.className = "bg-slate-800 py-2 rounded-lg text-xs font-bold";
-                areaTwin.classList.remove('hidden');
-                areaTouch.classList.add('hidden');
-                startCameraStream();
+                btnTwin.className = "bg-indigo-600 py-2 rounded-lg text-xs font-bold shadow-md", btnTouch.className = "bg-slate-800 py-2 rounded-lg text-xs font-bold";
+                areaTwin.classList.remove('hidden'), areaTouch.classList.add('hidden'), startCameraStream();
             }
         }
 
@@ -296,58 +271,27 @@
         }
 
         function startCameraStream() {
-            const constraints = { video: { facingMode: { ideal: "environment" } } };
-            navigator.mediaDevices.getUserMedia(constraints)
-                .then(stream => {
-                    videoElement.srcObject = stream;
-                    videoElement.play();
-                    animationFrameId = requestAnimationFrame(processWebcamFrame);
-                })
-                .catch(err => {
-                    navigator.mediaDevices.getUserMedia({ video: true })
-                        .then(streamFallback => {
-                            videoElement.srcObject = streamFallback;
-                            videoElement.play();
-                            animationFrameId = requestAnimationFrame(processWebcamFrame);
-                        })
-                        .catch(errFallback => alert("ไม่สามารถเข้าถึงกล้องได้เลยครับ"));
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
+                .then(stream => { videoElement.srcObject = stream; videoElement.play(); animationFrameId = requestAnimationFrame(processWebcamFrame); })
+                .catch(() => {
+                    navigator.mediaDevices.getUserMedia({ video: true }).then(stream => { videoElement.srcObject = stream; videoElement.play(); animationFrameId = requestAnimationFrame(processWebcamFrame); });
                 });
         }
 
-        function stopCameraStream() {
-            if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            if (videoElement && videoElement.srcObject) {
-                videoElement.srcObject.getTracks().forEach(track => track.stop());
-            }
-        }
+        function stopCameraStream() { if (animationFrameId) cancelAnimationFrame(animationFrameId); if (videoElement && videoElement.srcObject) videoElement.srcObject.getTracks().forEach(t => track.stop()); }
 
         function processWebcamFrame() {
             if (videoElement.readyState === videoElement.HAVE_CURRENT_DATA && currentMode === 'twin') {
-                canvasElement.width = videoElement.videoWidth;
-                canvasElement.height = videoElement.videoHeight;
+                canvasElement.width = videoElement.videoWidth; canvasElement.height = videoElement.videoHeight;
                 canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
-                const imageData = canvasCtx.getImageData(0, 0, canvasElement.width, canvasElement.height);
-                const markers = detector.detect(imageData);
-                
+                const markers = detector.detect(canvasCtx.getImageData(0, 0, canvasElement.width, canvasElement.height));
                 if (markers.length > 0) {
-                    const marker = markers[0];
-                    canvasCtx.strokeStyle = "#39ff14";
-                    canvasCtx.lineWidth = 3;
-                    canvasCtx.beginPath();
-                    marker.corners.forEach((corner, i) => {
-                        if (i === 0) canvasCtx.moveTo(corner.x, corner.y);
-                        else canvasCtx.lineTo(corner.x, corner.y);
-                    });
-                    canvasCtx.closePath();
-                    canvasCtx.stroke();
-
-                    const c0 = marker.corners[0], c1 = marker.corners[1], c2 = marker.corners[2];
-                    const angleY = Math.atan2(c1.y - c0.y, c1.x - c0.x);
-                    const side1 = Math.sqrt(Math.pow(c1.x-c0.x, 2) + Math.pow(c1.y-c0.y, 2));
-                    const side2 = Math.sqrt(Math.pow(c2.x-c1.x, 2) + Math.pow(c2.y-c1.y, 2));
-                    const angleX = Math.acos(Math.min(side2 / Math.max(side1, 1), 1)) * (c2.y > c1.y ? 1 : -1);
-
-                    sendAction('twin_rotate', { x: angleX * 0.7, y: -angleY, z: 0 });
+                    const m = markers[0];
+                    canvasCtx.strokeStyle = "#39ff14"; canvasCtx.lineWidth = 3; canvasCtx.beginPath();
+                    m.corners.forEach((c, i) => i === 0 ? canvasCtx.moveTo(c.x, c.y) : canvasCtx.lineTo(c.x, c.y));
+                    canvasCtx.closePath(); canvasCtx.stroke();
+                    const angleY = Math.atan2(m.corners[1].y - m.corners[0].y, m.corners[1].x - m.corners[0].x);
+                    sendAction('twin_rotate', { x: 0, y: -angleY, z: 0 });
                 }
             }
             if (currentMode === 'twin') animationFrameId = requestAnimationFrame(processWebcamFrame);
@@ -357,22 +301,17 @@
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-            renderer.autoClear = false; 
+            renderer.autoClear = false;
             document.getElementById('canvas-container').appendChild(renderer.domElement);
-
             for (let i = 0; i < 3; i++) {
                 const scene = new THREE.Scene();
-                scene.background = null;
                 const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
                 camera.position.z = 6;
-                
-                scene.add(new THREE.AmbientLight(0xffffff, 1.2)); 
-                const dirLight = new THREE.DirectionalLight(0xffffff, 1.5); 
-                dirLight.position.set(3, 5, 4);
+                scene.add(new THREE.AmbientLight(0xffffff, 1.5));
+                const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
+                dirLight.position.set(5, 5, 5);
                 scene.add(dirLight);
-                
-                scenes.push(scene);
-                cameras.push(camera);
+                scenes.push(scene); cameras.push(camera);
             }
             recreateAllGeometries('torus', '#00ffcc');
             animate();
@@ -384,92 +323,70 @@
 
             if (type === 'custom_artifact') {
                 const loader = new THREE.GLTFLoader();
-                
                 loader.load('Sohn_DoorLock_100463952.glb', function (gltf) {
-                   for (let i = 0; i < 3; i++) {
-                        const modelClone = gltf.scene.clone(); 
+                    for (let i = 0; i < 3; i++) {
+                        const modelClone = gltf.scene.clone();
                         modelClone.rotation.y = viewAngles[i];
                         
-                        // 🌟 จัดจุดกึ่งกลางโมเดล
+                        // คุมพิกัดศูนย์กลางวงกลม
                         const box = new THREE.Box3().setFromObject(modelClone);
                         const center = box.getCenter(new THREE.Vector3());
                         modelClone.position.x += (modelClone.position.x - center.x);
                         modelClone.position.y += (modelClone.position.y - center.y);
                         modelClone.position.z += (modelClone.position.z - center.z);
 
-                        // 🔍 [จุดแก้ที่ 1]: ลดขนาดลงตรงนี้! โค้ชใส่ตัวคูณ * 0.1 เอาไว้ให้ (จะทำให้ขนาดเล็กลง 10 เท่าทันที)
-                        // หากยังใหญ่ไป สามารถเปลี่ยนจาก 0.1 เป็น 0.05 หรือ 0.02 ได้ตามใจชอบเลยครับ
-                        modelClone.scale.set(baseScale * 0.1, baseScale * 0.1, baseScale * 0.1);
+                        // 🔍 ย่อสเกลโมเดลกลอนประตูลงมาให้เล็กพอดีกรอบอย่างสวยงาม ไม่ล้นจอ
+                        let initScale = baseScale * 0.04; 
+                        modelClone.scale.set(initScale, initScale, initScale);
                         
-                        // แปะป้ายบอกระบบว่าเป็นโมเดลพิเศษ
+                        // ล็อกสถานะห้ามเอาสีอื่นมาเททับ ผิวเบจ-แดง-ฟ้า ออริจินัลจะปลอดภัย 100%
                         modelClone.userData = { isCustom: true };
 
                         scenes[i].add(modelClone);
                         currentMeshes.push(modelClone);
                     }
-                }, undefined, function (error) {
-                    console.error('ไม่สามารถดึงไฟล์โมเดลขึ้นมาแสดงผลได้:', error);
                 });
-
             } else {
                 let geometry;
                 if (type === 'torus') geometry = new THREE.TorusKnotGeometry(0.8, 0.28, 100, 16);
                 else if (type === 'crystal') geometry = new THREE.IcosahedronGeometry(1.1, 0);
                 else if (type === 'cone') geometry = new THREE.ConeGeometry(0.9, 1.8, 32);
 
-                const material = new THREE.MeshStandardMaterial({
-                    color: new THREE.Color(colorHex),
-                    metalness: 0.3,
-                    roughness: 0.3,
-                    flatShading: type === 'crystal'
-                });
-
+                const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(colorHex), metalness: 0.3, roughness: 0.3, flatShading: type === 'crystal' });
                 for (let i = 0; i < 3; i++) {
                     const mesh = new THREE.Mesh(geometry, material.clone());
                     mesh.rotation.y = viewAngles[i];
                     mesh.scale.set(baseScale, baseScale, baseScale);
-                    scenes[i].add(mesh);
-                    currentMeshes.push(mesh);
+                    scenes[i].add(mesh); currentMeshes.push(mesh);
                 }
             }
         }
 
         function animate() {
-            requestAnimationFrame(animate);
-            renderer.clear();
+            requestAnimationFrame(animate); renderer.clear();
             const centerX = window.innerWidth / 2, centerY = window.innerHeight / 2;
-            const size = Math.min(window.innerWidth, window.innerHeight) * 0.35; 
-
+            const size = Math.min(window.innerWidth, window.innerHeight) * 0.35;
             const viewports = [
-                { x: centerX - size / 2, y: centerY - size / 2 + baseOffset }, 
-                { x: centerX - size / 2 + (baseOffset * Math.cos((7 * Math.PI) / 6)), y: centerY - size / 2 + (baseOffset * Math.sin((7 * Math.PI) / 6)) }, 
-                { x: centerX - size / 2 + (baseOffset * Math.cos((11 * Math.PI) / 6)), y: centerY - size / 2 + (baseOffset * Math.sin((11 * Math.PI) / 6)) } 
+                { x: centerX - size / 2, y: centerY - size / 2 + baseOffset },
+                { x: centerX - size / 2 + (baseOffset * Math.cos((7 * Math.PI) / 6)), y: centerY - size / 2 + (baseOffset * Math.sin((7 * Math.PI) / 6)) },
+                { x: centerX - size / 2 + (baseOffset * Math.cos((11 * Math.PI) / 6)), y: centerY - size / 2 + (baseOffset * Math.sin((11 * Math.PI) / 6)) }
             ];
-
             renderer.setScissorTest(true);
             for (let i = 0; i < 3; i++) {
-                const vp = viewports[i];
-                renderer.setScissor(vp.x, vp.y, size, size);
-                renderer.setViewport(vp.x, vp.y, size, size);
+                const vp = viewports[i]; renderer.setScissor(vp.x, vp.y, size, size); renderer.setViewport(vp.x, vp.y, size, size);
                 if (currentMode === 'touch' && currentMeshes[i]) currentMeshes[i].rotation.y += 0.003;
                 renderer.render(scenes[i], cameras[i]);
             }
         }
 
         function setupTouchpad() {
-            const pad = document.getElementById('area-touch-mode');
-            if (!pad) return;
-
+            const pad = document.getElementById('area-touch-mode'); if (!pad) return;
             let isDrawing = false, lastX = 0, lastY = 0;
-            pad.addEventListener('touchstart', e => {
-                if(currentMode !== 'touch') return;
-                isDrawing = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
-            });
+            pad.addEventListener('touchstart', e => { if(currentMode !== 'touch') return; isDrawing = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; });
             pad.addEventListener('touchmove', e => {
                 if (!isDrawing || currentMode !== 'touch') return;
                 const x = e.touches[0].clientX, y = e.touches[0].clientY;
-                sendAction('rotate', { deltaX: x - lastX, deltaY: y - lastY });
-                lastX = x; lastY = y;
+                sendAction('rotate', { deltaX: x - lastX, deltaY: y - lastY }); lastX = x; lastY = y;
             });
             pad.addEventListener('touchend', () => isDrawing = false);
         }

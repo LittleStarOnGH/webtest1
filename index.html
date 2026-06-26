@@ -445,4 +445,29 @@
             for (let i = 0; i < 3; i++) {
                 const vp = viewports[i];
                 renderer.setScissor(vp.x, vp.y, size, size);
-                renderer.setViewport(vp.x
+                renderer.setViewport(vp.x, vp.y, size, size);
+                if (currentMode === 'touch' && currentMeshes[i]) currentMeshes[i].rotation.y += 0.003;
+                renderer.render(scenes[i], cameras[i]);
+            }
+        }
+
+        function setupTouchpad() {
+            const pad = document.getElementById('area-touch-mode');
+            if (!pad) return;
+
+            let isDrawing = false, lastX = 0, lastY = 0;
+            pad.addEventListener('touchstart', e => {
+                if(currentMode !== 'touch') return;
+                isDrawing = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+            });
+            pad.addEventListener('touchmove', e => {
+                if (!isDrawing || currentMode !== 'touch') return;
+                const x = e.touches[0].clientX, y = e.touches[0].clientY;
+                sendAction('rotate', { deltaX: x - lastX, deltaY: y - lastY });
+                lastX = x; lastY = y;
+            });
+            pad.addEventListener('touchend', () => isDrawing = false);
+        }
+    </script>
+</body>
+</html>

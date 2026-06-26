@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title> 3: UEA Hologram Project </title>
+    <title> UEA Hologram Project </title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
@@ -15,10 +15,10 @@
 
     <div id="mode-selection" class="absolute inset-0 z-50 flex flex-col justify-center items-center bg-white p-6 text-center">
         <div class="mb-4">
-            <p class="text-xs text-indigo-600 font-bold tracking-widest uppercase">School of Engineering Physics and Mathematics </p>
+            <p class="text-xs text-indigo-600 font-bold tracking-widest uppercase">School of Engineering Physics and Mathematics</p>
             <img src="uea-logo.png" alt="University Logo" class="h-12 w-auto opacity-80 hover:opacity-100 transition-all mx-auto mt-2">
         </div>
-        <h1 class="text-3xl font-black mb-2 text-slate-800"> "Hologram" Project </h1>
+        <h1 class="text-3xl font-black mb-2 text-slate-800"> "Hologram" Project EMP2 </h1>
         <p class="text-xs text-slate-500 mb-8 max-w-xs">ระบบฉายแสง 3 ด้านสมมาตร ควบคุมผ่าน Touchpad หรือกล้องสแกนวัตถุจริง</p>
         <div class="flex flex-col gap-4 w-full max-w-xs">
             <button onclick="initPeer('screen')" class="bg-indigo-600 hover:bg-indigo-700 text-white py-4 rounded-2xl font-bold shadow-lg transition-all active:scale-95 text-sm cursor-pointer">
@@ -65,8 +65,8 @@
         <div class="space-y-3">
             <div class="text-center">
                 <h2 class="text-base font-bold text-indigo-400">🎛️ Premium Control</h2>
-                <div id="ctrl-python-status" class="inline-block mt-1 text-[11px] text-slate-400 font-medium bg-slate-900 px-3 py-1 rounded-lg border border-slate-800">
-                    ℹ️ Python Status Managed via Display Screen
+                <div id="ctrl-python-status" class="inline-block mt-1 text-[11px] text-amber-400 font-bold bg-amber-900/30 px-3 py-1 rounded-lg border border-amber-500/30">
+                    ⏳ Python: รอการเชื่อมต่อ...
                 </div>
             </div>
 
@@ -97,10 +97,20 @@
                     <button onclick="sendAction('shape', 'cone')" class="bg-slate-800 hover:bg-slate-700 py-2 rounded-md text-[10px] font-medium">ทรงกรวย</button>
                     <button onclick="sendAction('shape', 'custom_artifact')" class="bg-emerald-600 hover:bg-emerald-500 py-2 rounded-md text-[10px] font-bold shadow-lg text-white">🚪 Door Lock</button>
                 </div>
+                
+                <div class="pt-2 border-t border-slate-800">
+                    <label class="block text-[11px] font-bold text-slate-300 mb-1">🎨 เลือกสี (เฉพาะรูปทรงเรขาคณิต)</label>
+                    <input type="color" id="custom-color-picker" value="#00ffcc" oninput="sendAction('color', this.value)" class="w-full h-12 cursor-pointer rounded-md border-2 border-slate-600 bg-slate-900 p-1">
+                </div>
             </div>
-            
+
             <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-800 space-y-3">
                 <div class="flex justify-between text-[10px] font-bold text-slate-400">
+                    <span>ขยายขนาด (Scale)</span>
+                    <span id="scale-val" class="text-indigo-400">100%</span>
+                </div>
+                <input type="range" min="30" max="200" value="100" oninput="document.getElementById('scale-val').innerText = this.value + '%'; sendAction('scale', this.value)" class="w-full accent-indigo-500">
+                <div class="flex justify-between text-[10px] font-bold text-slate-400 pt-2">
                     <span>ระยะศูนย์กลาง (Offset)</span>
                     <span id="offset-val" class="text-indigo-400">130px</span>
                 </div>
@@ -117,12 +127,10 @@
     <script>
         let scenes = [], cameras = [], renderer, currentMeshes = [];
         let peer, conn, myRole = '';
-        let baseOffset = 130; 
+        let baseScale = 1.0, baseOffset = 130; 
         let currentMode = 'touch';
         let videoElement, canvasElement, canvasCtx, detector;
-        let animationFrameId;
-        let pythonSocket; 
-
+        let animationFrameId, pythonSocket; 
         const viewAngles = [0, (2 * Math.PI) / 3, (4 * Math.PI) / 3];
 
         function generateSimpleId() { return "uea-twin-" + Math.floor(1000 + Math.random() * 9000).toString(); }
@@ -167,7 +175,20 @@
         function setupReceiver() {
             conn.on('data', data => {
                 if (data.type === 'shape') {
-                    recreateAllGeometries(data.value, "#00ffcc");
+                    const picker = document.getElementById('custom-color-picker');
+                    const currentColor = picker ? picker.value : "#00ffcc";
+                    recreateAllGeometries(data.value, currentColor);
+                } else if (data.type === 'color') {
+                    currentMeshes.forEach(mesh => { 
+                        if(mesh.userData && mesh.userData.isCustom) return; 
+                        if(mesh.material && mesh.material.color) mesh.material.color.set(data.value); 
+                    });
+                } else if (data.type === 'scale') {
+                    baseScale = data.value / 100;
+                    currentMeshes.forEach(mesh => {
+                        let s = (mesh.userData && mesh.userData.isCustom) ? baseScale * 0.04 : baseScale;
+                        mesh.scale.set(s, s, s);
+                    });
                 } else if (data.type === 'offset') {
                     baseOffset = parseInt(data.value);
                 } else if (data.type === 'rotate') {
@@ -209,9 +230,12 @@
 
         function updatePythonStatusUI(isConnected) {
             const screenStatus = document.getElementById('screen-python-status');
+            const ctrlStatus = document.getElementById('ctrl-python-status');
             const msg = isConnected ? "🟢 Python: เชื่อมต่อสมองกลสำเร็จ!" : "🔴 Python: ขาดการเชื่อมต่อ";
             const bgClass = isConnected ? "bg-emerald-900/30 border-emerald-500/50 text-emerald-400" : "bg-red-900/30 border-red-500/50 text-red-400";
+            
             if (screenStatus) screenStatus.innerText = msg, screenStatus.className = `mt-2 text-[11px] font-bold px-3 py-1.5 rounded-lg border shadow-lg ${bgClass}`;
+            if (ctrlStatus) ctrlStatus.innerText = msg, ctrlStatus.className = `inline-block mt-1 text-[11px] font-bold px-3 py-1 rounded-lg border ${bgClass}`;
         }
 
         function switchControlMode(mode) {
@@ -237,9 +261,7 @@
         function startCameraStream() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
                 .then(stream => { videoElement.srcObject = stream; videoElement.play(); animationFrameId = requestAnimationFrame(processWebcamFrame); })
-                .catch(() => {
-                    navigator.mediaDevices.getUserMedia({ video: true }).then(stream => { videoElement.srcObject = stream; videoElement.play(); animationFrameId = requestAnimationFrame(processWebcamFrame); });
-                });
+                .catch(() => { navigator.mediaDevices.getUserMedia({ video: true }).then(stream => { videoElement.srcObject = stream; videoElement.play(); animationFrameId = requestAnimationFrame(processWebcamFrame); }); });
         }
 
         function stopCameraStream() { if (animationFrameId) cancelAnimationFrame(animationFrameId); if (videoElement && videoElement.srcObject) videoElement.srcObject.getTracks().forEach(t => t.stop()); }
@@ -272,15 +294,11 @@
                 const scene = new THREE.Scene();
                 const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
                 camera.position.z = 6;
-                
-                // เพิ่มแสงสว่างอัดเข้าโมเดล
                 scene.add(new THREE.AmbientLight(0xffffff, 2.5)); 
                 const dirLight = new THREE.DirectionalLight(0xffffff, 3.0); 
                 dirLight.position.set(5, 5, 5);
                 scene.add(dirLight);
-                
-                scenes.push(scene);
-                cameras.push(camera);
+                scenes.push(scene); cameras.push(camera);
             }
             recreateAllGeometries('torus', '#00ffcc');
             animate();
@@ -297,28 +315,22 @@
                         const modelClone = gltf.scene.clone();
                         modelClone.rotation.y = viewAngles[i];
                         
-                        // 🌟 ระบบคำนวณ Auto-Scale ย่อส่วนขนาดอัจฉริยะ (แก้ปัญหาภาพทะลุจอ 100%)
                         const box = new THREE.Box3().setFromObject(modelClone);
                         const center = box.getCenter(new THREE.Vector3());
                         const size = box.getSize(new THREE.Vector3());
                         const maxDim = Math.max(size.x, size.y, size.z);
                         
-                        // บังคับให้ด้านที่ใหญ่ที่สุดของโมเดลมีขนาดเท่ากับ 1.5 หน่วยเป๊ะๆ
                         const targetSize = 1.5; 
                         const scaleFactor = targetSize / maxDim;
                         
                         modelClone.scale.set(scaleFactor, scaleFactor, scaleFactor);
-                        
-                        // จัดโมเดลให้อยู่กึ่งกลางเป๊ะ
                         modelClone.position.x = -center.x * scaleFactor;
                         modelClone.position.y = -center.y * scaleFactor;
                         modelClone.position.z = -center.z * scaleFactor;
+                        modelClone.userData = { isCustom: true };
 
-                        scenes[i].add(modelClone);
-                        currentMeshes.push(modelClone);
+                        scenes[i].add(modelClone); currentMeshes.push(modelClone);
                     }
-                }, undefined, function (error) {
-                    console.error('พบข้อผิดพลาดในการโหลดไฟล์กลอนประตู:', error);
                 });
             } else {
                 let geometry;
@@ -330,6 +342,7 @@
                 for (let i = 0; i < 3; i++) {
                     const mesh = new THREE.Mesh(geometry, material.clone());
                     mesh.rotation.y = viewAngles[i];
+                    mesh.scale.set(baseScale, baseScale, baseScale);
                     scenes[i].add(mesh); currentMeshes.push(mesh);
                 }
             }
